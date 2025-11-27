@@ -4,7 +4,7 @@ import json
 import random
 from const import RACES_PATH, USERS_PATH
 from shop import car_exists
-from utility_functions import desencrypt_data, encrypt_data, load_encrypted_data, store_encrypted_data, type_text, user_exists
+from utility_functions import desencrypt_data, encrypt_data, encrypt_rsa_message, load_encrypted_data, store_encrypted_data, type_text, user_exists
 from utility_functions import load_data, store_data, type_text
 import tkinter as tk
 
@@ -12,18 +12,25 @@ import tkinter as tk
 selected_race = 0
 
 #Se encarga de crear el mensaje el cual se almacenara en el path indicado. Cada usuario tiene su archivo con todas las carreras que le han propuesto
-def create_race(rival, race_car_data, user_name, terminal, msg_key):
+def create_race(rival, race_car_data, user_name, terminal):
     path = RACES_PATH + f"{rival}" + "_races.json" 
     race_data = load_data(path)
     if race_data == {}:
         race_data = []
 
     race_car_bytes = json.dumps(race_car_data).encode("utf-8")
-    # Dentro del mensaje el campo de race_car va incriptado con una clave introducida por el usuario
-    cipher, ciphertext, tag = encrypt_data(msg_key, race_car_bytes)
+    
+    # Dentro del mensaje el campo de race_car va incriptado con la clave pública del rival
+    # Primer la obtenemos
+    rival_user_data = load_data(USERS_PATH)
+    rival_public_key = rival_user_data[rival]["public_key"].encode('ascii')
+
+    # Ciframos el coche con la clave pública del rival
+    encrypted_car = encrypt_rsa_message(race_car_bytes, rival_public_key, terminal)
+
     race = {
         "rival":user_name,
-        "race_car":base64.b64encode(cipher.nonce + tag + ciphertext).decode("ascii")
+        "race_car":base64.b64encode(encrypted_car).decode("ascii")
     }
     race_data.append(race)
     store_data(race_data, path)
@@ -31,12 +38,9 @@ def create_race(rival, race_car_data, user_name, terminal, msg_key):
 
 
 # Se encarga de la lógica de enviar el mensaje (comprobaciones previas y cargar el coche que se quiere enviar)
-def send_race(rival:str, race_car:str, user_name:str, terminal, user_path, user_key, msg_key):
+def send_race(rival:str, race_car:str, user_name:str, terminal, user_path, user_key):
     if rival == "" or race_car == "":
         type_text(terminal, "Complete todos los campos por favor\n")
-        return 
-    if len(msg_key) != 32:
-        type_text(terminal, "La clave de cifrado debe tener 32 caracteres y debe ser la misma que la de descifrado\n")
         return 
     if rival == user_name:
         type_text(terminal, "No puedes hacer una carrera contra ti mismo\nIntroduzca uno válido\n")
@@ -51,20 +55,24 @@ def send_race(rival:str, race_car:str, user_name:str, terminal, user_path, user_
     if not car:
         type_text(terminal, "No tienes este coche\nConsulta tu garage y elige uno\n")
         return
-    create_race(rival, user_data["garage"][car_pos], user_name, terminal, msg_key)
+    race_car_data = user_data["garage"][car_pos]
+    #Eliminamos la información innecesaria para el mensaje
+    filtered_race_car_data = {
+        'brand': race_car_data['brand'],
+        'model': race_car_data['model'],
+        'stats': race_car_data['stats'],
+        'upgrades': [u['name'] for u in race_car_data['upgrades']]
+    }
+    print(filtered_race_car_data)
+    car_bytes = json.dumps(filtered_race_car_data).encode('utf-8')
+    print(len(car_bytes))
+    create_race(rival, filtered_race_car_data, user_name, terminal)
 
 
 # Función que se encarga de mostrar por terminal todas las carreras disponibles para un usuario (para ello hay que descifrarlas primero con la contraseña simétrica acordada)
 def type_race(user_name, terminal, msg_key):
     global selected_race
     terminal.delete("1.0", tk.END)
-    if not msg_key:
-        type_text(terminal, "Por favor introduzca la clave de cifrado\n")
-        return
-    
-    if len(msg_key) != 32:
-        type_text(terminal, "La clave de descifrado debe tener 32 caracteres y debe ser la misma que la de cifrado\n")
-        return 
 
     race_path = RACES_PATH + f"{user_name}" + "_races.json" 
 

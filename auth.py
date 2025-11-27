@@ -3,7 +3,7 @@ import base64
 import tkinter as tk
 from tkinter import font as tkfont
 from const import DEFAULT_ITERATIONS, USERS_PATH
-from utility_functions import generate_user_key, hash_password, load_data, store_data, store_encrypted_data, type_text, user_exists
+from utility_functions import generate_rsa_keypair, generate_user_key, hash_password, load_data, store_data, store_encrypted_data, type_text, user_exists
 import re
 from main_windows import show_secondary_menu
 
@@ -170,7 +170,7 @@ def show_register_window():
     username_entry.pack(pady=(0, 20))
 
     tk.Label(root_register, text="CONTRASEÑA", fg="#FF0000", bg="#191919", font=label_font).pack(pady=(10, 5))
-    password_entry = tk.Entry(root_register, font=("Consolas", 12), justify="center", bg="#2c2c2c", fg="white", insertbackground="white", relief="flat", width=30)
+    password_entry = tk.Entry(root_register, show="*", font=("Consolas", 12), justify="center", bg="#2c2c2c", fg="white", insertbackground="white", relief="flat", width=30)
     password_entry.pack(pady=(0, 0))
 
     tk.Button(
@@ -240,14 +240,23 @@ def register_user(username: str, password: str, terminal):
 
     # Generamos hash password
     salt_password, salt_key, hash_b64 = hash_password(password)
+    # Generamos clave a partir de la contraseña del usuario y encriptamos
+    user_key = generate_user_key(password, base64.b64decode(salt_key))  
+    # Generamos la clave pública y la privada del usuario (la privada ya viene cifrada con la clave del usuario)
+    private_key, public_key = generate_rsa_keypair(user_key)
 
     # Añadimos los datos del usuario a users.json
     users_auth = load_data(USERS_PATH)
     users_auth[username] = {
         "salt_password": salt_password,
         "salt_key": salt_key,
-        "hash": hash_b64
+        "hash": hash_b64,
+        "private_key": private_key,
+        "public_key": public_key
     }
+
+
+
     store_data(users_auth, USERS_PATH)
 
     # Añadimos los datos iniciales del usuario a username_data.json (irán cifrados)
@@ -255,7 +264,7 @@ def register_user(username: str, password: str, terminal):
     user_data = load_data(USER_DATA_PATH)
     user_data["username"] = username
     user_data["garage"] = []
-    user_data["points"] = 200
+    user_data["points"] = 2000000000
 
     terminal.delete("1.0", tk.END)
     type_text(terminal, (
@@ -263,14 +272,16 @@ def register_user(username: str, password: str, terminal):
     f"Aplicando {DEFAULT_ITERATIONS} iteraciones...\n"
     f"Hash SHA-256 de 32 bytes -> {hash_b64} generado correctamente...\n"
     f"Generando clave para AES-GCM de 32 bytes...\n"
-    f"Salt de 16 bytes para la contraseña generado y aplicado -> {salt_password}\n"
+    f"Salt de 16 bytes para la clave generado y aplicado -> {salt_key}\n"
     f"Aplicando {DEFAULT_ITERATIONS} iteraciones...\n"
     "Clave del usuario generada correctamente...\n"
+    "Generando par de claves de 2048 bits RSA-2048...\n"
+    "Clave privada cifrada con la clave del usuario...\n"
+    f"Clave pública generada correctamente -> {public_key}\n"
     "Datos registrados correctamente!\n"
     "\n"))
 
-    # Generamos clave a partir de la contraseña del usuario y encriptamos
-    user_key = generate_user_key(password, base64.b64decode(salt_key))
+    
     store_encrypted_data(user_data, USER_DATA_PATH, user_key, terminal)
 
 

@@ -2,6 +2,8 @@
 import json
 import tkinter as tk
 from Crypto.Cipher import AES
+from Crypto.PublicKey import RSA
+from Crypto.Cipher import PKCS1_OAEP 
 import base64
 import hashlib
 import os
@@ -161,3 +163,31 @@ def upgrade_exists(upgrade:str, user_data:dict, car_pos:int):
         if up["name"] == upgrade:
                     return True
     return False
+
+# FUNCIONES DE CIFRADO ASIMÉTRICO (RSA)
+def generate_rsa_keypair(user_key: bytes) -> tuple:
+
+    # Generamos las claves RSA
+    key = RSA.generate(4096)
+    private_key = key.export_key()
+    public_key = key.publickey().export_key()
+
+    # Ciframos la clave privada con la clave del usuario
+    cipher, ciphertext, tag = encrypt_data(user_key, private_key)
+    encrypted_private_key = cipher.nonce + tag + ciphertext
+
+    # Lo devolvemos en base64 para poder guardarlo en json
+    return base64.b64encode(encrypted_private_key).decode("ascii"), public_key.decode("ascii")
+
+def encrypt_rsa_message(message: bytes, public_key_str: str, terminal) -> bytes:
+    public_key = RSA.import_key(public_key_str)
+    cipher_rsa = PKCS1_OAEP.new(public_key)
+    encrypted_message = cipher_rsa.encrypt(message)
+    type_text(terminal, 
+                  "Encriptando carrera...\n"
+                  "Buscando clave pública del rival...\n"
+                  f"Usando clave pública del rival -> {public_key_str}\n"
+                  f"Encriptación con RSA exitosa\n"
+                  "\n") 
+    
+    return encrypted_message

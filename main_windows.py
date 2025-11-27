@@ -540,14 +540,10 @@ def show_propose_race(user_path:str, user_name:str, user_key):
     race_car_entry = tk.Entry(root_propose_race, font=("Consolas", 12), justify="center", bg="#2c2c2c", fg="white", insertbackground="white", relief="flat", width=30)
     race_car_entry.pack(pady=(10, 0))
 
-    tk.Label(root_propose_race, text="Clave cifrado mensaje:", fg="#FF0000", bg="#191919", font=label_font).pack(pady=(10, 0))
-    msg_key_entry = tk.Entry(root_propose_race, font=("Consolas", 12), justify="center", bg="#2c2c2c", fg="white", insertbackground="white", relief="flat", width=30)
-    msg_key_entry.pack(pady=(10, 0))
-
     tk.Button(
             root_propose_race,
             text="ENVIAR CARRERA",
-            command=lambda: [send_race(rival_username_entry.get(), race_car_entry.get(), user_name, terminal, user_path, user_key, msg_key_entry.get().encode("utf-8"))],
+            command=lambda: [send_race(rival_username_entry.get(), race_car_entry.get(), user_name, terminal, user_path, user_key)],
             fg="white",
             bg="#ac3333",
             activebackground="#bd6c6c",
