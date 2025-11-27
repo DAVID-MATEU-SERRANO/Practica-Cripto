@@ -10,13 +10,14 @@ import os
 from collections import deque
 from const import DEFAULT_ITERATIONS
 
-#Variables globales para la función type_text
+#VARIABLES GLOBALES para la función type_text
 typing_after_id = None
 typing_after_id = None
 typing_queue = deque()
 
-# Genera el hash de la contraseña introducida por el usuario
+# FUNCIÓN HASH
 def hash_password(password: str, salt_password: bytes = None) -> tuple:
+    # Genera el hash de la contraseña introducida por el usuario
     if salt_password is None:
         salt_password = os.urandom(16) #El salt se genera aleatoriamente
     
@@ -33,8 +34,10 @@ def hash_password(password: str, salt_password: bytes = None) -> tuple:
         base64.b64encode(value).decode("ascii")
     )
 
-#Genera una clave a partir de la contraseña de cada usuario -> todos los datos del usuario se cifran con esta clave
+
+# FUNCIONES PARA GENERAR CLAVES
 def generate_user_key(password: str, salt: bytes) -> bytes:
+    #Genera una clave a partir de la contraseña de cada usuario -> todos los datos del usuario se cifran con esta clave
     #Se le aplica un salt aleatorio para añadir seguridad (este salt es distinto al que se aplica al hash de la contraseña)
     value = salt + (password).encode("utf-8")
     for _ in range(DEFAULT_ITERATIONS):
@@ -43,8 +46,30 @@ def generate_user_key(password: str, salt: bytes) -> bytes:
 
     return value  # Retornamos la clave AES-256 de 32 bytes
 
-# Funciones de encriptar y desencriptar proporcionando una clave
-def desencrypt_data(file_bytes, key, terminal):
+def generate_rsa_keypair(user_key: bytes) -> tuple:
+    # Generamos las claves RSA
+    key = RSA.generate(4096)
+    private_key = key.export_key()
+    public_key = key.publickey().export_key()
+
+    # Ciframos la clave privada con la clave del usuario
+    cipher, ciphertext, tag = encrypt_data(user_key, private_key)
+    encrypted_private_key = cipher.nonce + tag + ciphertext
+
+    # Lo devolvemos en base64 para poder guardarlo en json
+    return base64.b64encode(encrypted_private_key).decode("ascii"), public_key.decode("ascii")
+
+def generate_random_symmetric_key(terminal) -> bytes:
+    # Generamos la clave simétrica temporal para el cifrado híbrido (AES-256 GCM)
+    type_text(terminal, 
+            "Generando clave simétrica temporal...\n"
+            "Clave simétrica temporal generada correctamente\n"
+            "\n") 
+    return os.urandom(32)
+
+
+# FUNCIONES PARA ENCRIPTADO / DESENCRIPTADO SIMÉTRICO
+def desencrypt_data(file_bytes, key, terminal, decode=True):
     # Obtenemos el nonce, tag y el texto cifrado
     try:
         nonce = file_bytes[:16]
@@ -61,10 +86,14 @@ def desencrypt_data(file_bytes, key, terminal):
             f"Verificación MAC exitosa\n"
             f"Desencriptación con AES-256 GCM exitosa\n"
             "\n") #Los espacios son para q tarde un tiempo en saltar al siguient mensaje en cola
-        
-        return json.loads(plaintext.decode("utf-8")) # Se devuelve el texto ya desencriptado
+        if decode:
+            return json.loads(plaintext.decode("utf-8")) # Se devuelve el texto ya desencriptado
+        else:
+            return plaintext
+            
     except ValueError:
         #Eso significa que la autenticación ha fallado o que las claves no son las mismas
+        print(f"USADA_KEY ->>> {key}")
         type_text(terminal, "ERROR GRAVE: las claves de cifrado y descifrado no coinciden o alguien ha modificado el archivo\n") 
         return None
 
@@ -75,6 +104,7 @@ def encrypt_data(key, plaintext):
     return cipher,ciphertext,tag #Devolvemos la información adicional para guardarla luego
 
 
+# FUNCIONES LOAD/STORE
 # Funciones load/store pero antes de guardar/cargar tienen que encriptar/desencriptar
 def load_encrypted_data(filepath: str, key: bytes, terminal) -> dict:
     with open(filepath, "rb") as f:
@@ -118,6 +148,7 @@ def store_data(data: dict, path: str):
         raise Exception("Error guardando el archivo\n")
 
 
+# FUNCION PARA LA TERMINAL DE TKINTER
 #Función que se encarga de imprimir por la terminal de la ventana de tkinter
 #Delay -> como de lento escribe
 def type_text(terminal, text, delay=2, index=0):
@@ -143,7 +174,8 @@ def type_text(terminal, text, delay=2, index=0):
             next_text = typing_queue.popleft()
             type_text(terminal, next_text, delay, 0)
 
-# Funciones para comprobar la existencia de algo
+
+# FUNCIONES PARA COMPROBAR LA EXISTENCIA DE ALGO
 def user_exists(username: str, user_file) -> bool:
     users = load_data(user_file)
     return username in users
@@ -164,30 +196,29 @@ def upgrade_exists(upgrade:str, user_data:dict, car_pos:int):
                     return True
     return False
 
+
 # FUNCIONES DE CIFRADO ASIMÉTRICO (RSA)
-def generate_rsa_keypair(user_key: bytes) -> tuple:
-
-    # Generamos las claves RSA
-    key = RSA.generate(4096)
-    private_key = key.export_key()
-    public_key = key.publickey().export_key()
-
-    # Ciframos la clave privada con la clave del usuario
-    cipher, ciphertext, tag = encrypt_data(user_key, private_key)
-    encrypted_private_key = cipher.nonce + tag + ciphertext
-
-    # Lo devolvemos en base64 para poder guardarlo en json
-    return base64.b64encode(encrypted_private_key).decode("ascii"), public_key.decode("ascii")
-
 def encrypt_rsa_message(message: bytes, public_key_str: str, terminal) -> bytes:
     public_key = RSA.import_key(public_key_str)
     cipher_rsa = PKCS1_OAEP.new(public_key)
     encrypted_message = cipher_rsa.encrypt(message)
     type_text(terminal, 
-                  "Encriptando carrera...\n"
+                  "Encriptando clave simétrica temporal...\n"
                   "Buscando clave pública del rival...\n"
                   f"Usando clave pública del rival -> {public_key_str}\n"
-                  f"Encriptación con RSA exitosa\n"
+                  f"Encriptación con RSA OAEP exitosa\n"
                   "\n") 
     
     return encrypted_message
+
+def decrypt_rsa_message(encrypted_message: bytes, private_key_str: str, terminal) -> bytes:
+    private_key = RSA.import_key(private_key_str)
+    cipher_rsa = PKCS1_OAEP.new(private_key)
+    decrypted_message = cipher_rsa.decrypt(encrypted_message)
+    type_text(terminal, 
+                  "Desencriptando clave simétrica temporal...\n"
+                  "Usando clave privada...\n"
+                  f"Desencriptación con RSA OAEP exitosa\n"
+                  "\n") 
+    
+    return decrypted_message

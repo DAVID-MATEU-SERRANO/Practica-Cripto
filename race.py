@@ -1,4 +1,6 @@
 #race.py
+from utility_functions import decrypt_rsa_message
+from utility_functions import generate_random_symmetric_key
 import base64
 import json
 import random
@@ -20,17 +22,26 @@ def create_race(rival, race_car_data, user_name, terminal):
 
     race_car_bytes = json.dumps(race_car_data).encode("utf-8")
     
-    # Dentro del mensaje el campo de race_car va incriptado con la clave pública del rival
-    # Primer la obtenemos
+    # Dentro del mensaje el campo de race_car va encriptado usando el cifrado híbrido
+    # Primer obtenemos la clave pública del rival
     rival_user_data = load_data(USERS_PATH)
     rival_public_key = rival_user_data[rival]["public_key"].encode('ascii')
 
-    # Ciframos el coche con la clave pública del rival
-    encrypted_car = encrypt_rsa_message(race_car_bytes, rival_public_key, terminal)
-
+    # Generamos la clave simétrica temporal para el cifrado híbrido (AES-256 GCM)
+    symmetric_key = generate_random_symmetric_key(terminal)
+    
+    # Ciframos el coche con la clave simétrica temporal
+    cipher, ciphertext, tag = encrypt_data(symmetric_key, race_car_bytes)
+    encrypted_car = cipher.nonce + tag + ciphertext
+    
+    # Ciframos la clave simétrica temporal con la clave pública del rival
+    encrypted_symmetric_key = encrypt_rsa_message(symmetric_key, rival_public_key, terminal)
+    
+    # Creamos el mensaje
     race = {
         "rival":user_name,
-        "race_car":base64.b64encode(encrypted_car).decode("ascii")
+        "race_car":base64.b64encode(encrypted_car).decode("ascii"),
+        "symmetric_key":base64.b64encode(encrypted_symmetric_key).decode("ascii")
     }
     race_data.append(race)
     store_data(race_data, path)
@@ -56,26 +67,17 @@ def send_race(rival:str, race_car:str, user_name:str, terminal, user_path, user_
         type_text(terminal, "No tienes este coche\nConsulta tu garage y elige uno\n")
         return
     race_car_data = user_data["garage"][car_pos]
-    #Eliminamos la información innecesaria para el mensaje
-    filtered_race_car_data = {
-        'brand': race_car_data['brand'],
-        'model': race_car_data['model'],
-        'stats': race_car_data['stats'],
-        'upgrades': [u['name'] for u in race_car_data['upgrades']]
-    }
-    print(filtered_race_car_data)
-    car_bytes = json.dumps(filtered_race_car_data).encode('utf-8')
-    print(len(car_bytes))
-    create_race(rival, filtered_race_car_data, user_name, terminal)
+    create_race(rival, race_car_data, user_name, terminal)
 
 
-# Función que se encarga de mostrar por terminal todas las carreras disponibles para un usuario (para ello hay que descifrarlas primero con la contraseña simétrica acordada)
-def type_race(user_name, terminal, msg_key):
+# Función que se encarga de mostrar por terminal todas las carreras disponibles para un usuario (para ello hay que descifrarlas primero con la contraseña simétrica cifrada)
+def type_race(user_name, terminal, user_key):
     global selected_race
     terminal.delete("1.0", tk.END)
 
     race_path = RACES_PATH + f"{user_name}" + "_races.json" 
-
+    
+    # Cargamos el archivo de las carreras y hacemos las comprobaciones previas
     race_data = load_data(race_path)
     if race_data == {}:
         type_text(terminal, "Vaya, nadie te ha desafiado aún\n")
@@ -87,7 +89,8 @@ def type_race(user_name, terminal, msg_key):
     if selected_race < 0:
         selected_race = len(race_data) - 1
 
-    race_car = desencrypt_data(base64.b64decode(race_data[selected_race]["race_car"]), msg_key, terminal)
+    race_car = decrypt_selected_race(user_name, terminal, user_key, race_data)
+    
     if race_car["upgrades"]:
         upgrades_text = ""
         for u in race_car["upgrades"]:
@@ -105,26 +108,24 @@ def type_race(user_name, terminal, msg_key):
     Mejoras: {upgrades_text}""")
 
 # Lógica para ir cambiando de carrera
-def next_race(user_name:str, terminal, msg_key):
+def next_race(user_name:str, terminal, user_key):
     global selected_race
     selected_race +=1
-    type_race(user_name, terminal, msg_key)
+    type_race(user_name, terminal, user_key)
 
-def previous_race(user_name:str, terminal, msg_key):
+def previous_race(user_name:str, terminal, user_key):
     global selected_race
     selected_race -=1
-    type_race(user_name, terminal, msg_key)    
+    type_race(user_name, terminal, user_key)    
 
 # Carrera
-def race(user_name, user_path, user_key, terminal, selected_race_car, msg_key):
+def race(user_name, user_path, user_key, terminal, selected_race_car):
     global selected_race
-    if len(msg_key) != 32:
-        type_text(terminal, "La clave de descifrado debe tener 32 caracteres y debe ser la misma que la de cifrado\n")
-        return 
     
     race_path = RACES_PATH + f"{user_name}" + "_races.json" 
     race_data = load_data(race_path)
-    race_car = desencrypt_data(base64.b64decode(race_data[selected_race]["race_car"]), msg_key, terminal)
+    race_car = decrypt_selected_race(user_name, terminal, user_key, race_data)
+
     oponent_race_car = race_car
 
     user_data = load_encrypted_data(user_path, user_key, terminal)
@@ -195,9 +196,16 @@ def race(user_name, user_path, user_key, terminal, selected_race_car, msg_key):
     type_text(terminal, race_msg)
 
 
-            
-
-    
-
+# Función auxiliar que descifra la carrera seleccionada
+def decrypt_selected_race(user_name, terminal, user_key, race_data):
+    # Desciframos la carrera seleccionada 
+    # Primero desciframos la clave simétrica temporal
+    user_data = load_data(USERS_PATH)
+    private_key_encrypted = base64.b64decode(user_data[user_name]["private_key"])
+    private_key = desencrypt_data(private_key_encrypted, user_key, terminal, False)
+    symmetric_key = decrypt_rsa_message(base64.b64decode(race_data[selected_race]["symmetric_key"]), private_key, terminal)
+    # Luego desciframos el coche
+    race_car = desencrypt_data(base64.b64decode(race_data[selected_race]["race_car"]), symmetric_key, terminal)
+    return race_car
 
 

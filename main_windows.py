@@ -601,14 +601,10 @@ def show_available_races(user_path:str, user_name:str, user_key):
     #Elementos
     tk.Label(root_available_races, text=user_name, fg="white", bg="#191919", font=title_font).pack(pady=(10, 0))
 
-    tk.Label(root_available_races, text="Clave descifrado mensaje:", fg="#FF0000", bg="#191919", font=label_font).pack(pady=(10, 0))
-    msg_key_entry = tk.Entry(root_available_races, font=("Consolas", 12), justify="center", bg="#2c2c2c", fg="white", insertbackground="white", relief="flat", width=30)
-    msg_key_entry.pack(pady=(10, 0))
-
     tk.Button(
             root_available_races,
             text="MOSTRAR CARRERAS",
-            command=lambda: [type_race(user_name, terminal, msg_key_entry.get().encode("utf-8"))],
+            command=lambda: [type_race(user_name, terminal, user_key)],
             fg="white",
             bg="#ac3333",
             activebackground="#bd6c6c",
@@ -624,7 +620,7 @@ def show_available_races(user_path:str, user_name:str, user_key):
     tk.Button(
             root_available_races,
             text="SIGUIENTE CARRERA",
-            command=lambda: [next_race(user_name, terminal, msg_key_entry.get().encode("utf-8"))],
+            command=lambda: [next_race(user_name, terminal, user_key)],
             fg="white",
             bg="#ac3333",
             activebackground="#bd6c6c",
@@ -640,7 +636,7 @@ def show_available_races(user_path:str, user_name:str, user_key):
     tk.Button(
             root_available_races,
             text="ANTERIOR CARRERA",
-            command=lambda: [previous_race(user_name, terminal, msg_key_entry.get().encode("utf-8"))],
+            command=lambda: [previous_race(user_name, terminal, user_key)],
             fg="white",
             bg="#ac3333",
             activebackground="#bd6c6c",
@@ -661,8 +657,7 @@ def show_available_races(user_path:str, user_name:str, user_key):
     tk.Button(
             root_available_races,
             text="INICIAR CARRERA",
-            command=lambda: [race(user_name, user_path, user_key, terminal, race_car_entry.get(), msg_key_entry.get().encode("utf-8")
-)],
+            command=lambda: [race(user_name, user_path, user_key, terminal, race_car_entry.get())],
             fg="white",
             bg="#ac3333",
             activebackground="#bd6c6c",
