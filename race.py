@@ -1,4 +1,6 @@
 #race.py
+from utility_functions import verify_signature
+from utility_functions import sign_message
 from utility_functions import decrypt_rsa_message
 from utility_functions import generate_random_symmetric_key
 import base64
@@ -14,24 +16,32 @@ import tkinter as tk
 selected_race = 0
 
 #Se encarga de crear el mensaje el cual se almacenara en el path indicado. Cada usuario tiene su archivo con todas las carreras que le han propuesto
-def create_race(rival, race_car_data, user_name, terminal):
+def create_race(rival, race_car_data, user_name, terminal, user_key):
     path = RACES_PATH + f"{rival}" + "_races.json" 
     race_data = load_data(path)
     if race_data == {}:
         race_data = []
 
-    race_car_bytes = json.dumps(race_car_data).encode("utf-8")
+    user_data = load_data(USERS_PATH)
+    # Antes de cifrar nada, firmamos el mensaje
+    # Obtenemos la clave privada del usuario
+    private_key_encrypted = base64.b64decode(user_data[user_name]["private_key_sign"])
+    private_key = desencrypt_data(private_key_encrypted, user_key, terminal, False)
+
+    # Firmamos el mensaje 
+    race_car_json = json.dumps(race_car_data)
+    signature = sign_message(private_key, race_car_json, terminal)
+    race_car_bytes = race_car_json.encode("utf-8") # Se usará luego para encriptar
     
     # Dentro del mensaje el campo de race_car va encriptado usando el cifrado híbrido
-    # Primer obtenemos la clave pública del rival
-    rival_user_data = load_data(USERS_PATH)
-    rival_public_key = rival_user_data[rival]["public_key"].encode('ascii')
+    # Primer obtenemos la clave pública del rival (la que se usa para cifrar)
+    rival_public_key = user_data[rival]["public_key_cod"].encode('ascii')
 
     # Generamos la clave simétrica temporal para el cifrado híbrido (AES-256 GCM)
     symmetric_key = generate_random_symmetric_key(terminal)
     
     # Ciframos el coche con la clave simétrica temporal
-    cipher, ciphertext, tag = encrypt_data(symmetric_key, race_car_bytes)
+    cipher, ciphertext, tag = encrypt_data(symmetric_key, race_car_bytes, terminal)
     encrypted_car = cipher.nonce + tag + ciphertext
     
     # Ciframos la clave simétrica temporal con la clave pública del rival
@@ -41,7 +51,8 @@ def create_race(rival, race_car_data, user_name, terminal):
     race = {
         "rival":user_name,
         "race_car":base64.b64encode(encrypted_car).decode("ascii"),
-        "symmetric_key":base64.b64encode(encrypted_symmetric_key).decode("ascii")
+        "symmetric_key":base64.b64encode(encrypted_symmetric_key).decode("ascii"),
+        "signature":signature
     }
     race_data.append(race)
     store_data(race_data, path)
@@ -65,9 +76,9 @@ def send_race(rival:str, race_car:str, user_name:str, terminal, user_path, user_
     car, car_pos = car_exists(race_car, user_data)
     if not car:
         type_text(terminal, "No tienes este coche\nConsulta tu garage y elige uno\n")
-        return
+        return  
     race_car_data = user_data["garage"][car_pos]
-    create_race(rival, race_car_data, user_name, terminal)
+    create_race(rival, race_car_data, user_name, terminal, user_key)
 
 
 # Función que se encarga de mostrar por terminal todas las carreras disponibles para un usuario (para ello hay que descifrarlas primero con la contraseña simétrica cifrada)
@@ -89,7 +100,10 @@ def type_race(user_name, terminal, user_key):
     if selected_race < 0:
         selected_race = len(race_data) - 1
 
-    race_car = decrypt_selected_race(user_name, terminal, user_key, race_data)
+    race_car = decrypt_selected_race(user_name, terminal, user_key, race_data) #Realiza la comprobación de la firma y descifra el coche
+    if not race_car:
+        # La firma era incorrecta
+        return
     
     if race_car["upgrades"]:
         upgrades_text = ""
@@ -121,10 +135,13 @@ def previous_race(user_name:str, terminal, user_key):
 # Carrera
 def race(user_name, user_path, user_key, terminal, selected_race_car):
     global selected_race
-    
+    terminal.delete("1.0", tk.END)
     race_path = RACES_PATH + f"{user_name}" + "_races.json" 
     race_data = load_data(race_path)
     race_car = decrypt_selected_race(user_name, terminal, user_key, race_data)
+    if not race_car:
+        # La firma era incorrecta
+        return
 
     oponent_race_car = race_car
 
@@ -142,6 +159,7 @@ def race(user_name, user_path, user_key, terminal, selected_race_car):
     # Despueés de actualizan los puntos correspondientemente
     adelantamiento = random.randint(1, 10)
     race_msg = ""
+    race_msg += "###############################\n"
     if oponnent_score > user_score:
         race_msg += f"El {oponent_race_car["brand"]} {oponent_race_car["model"]} de {race_data[selected_race]["rival"]} toma la delantera!!\n"
         if adelantamiento > 7:
@@ -185,27 +203,35 @@ def race(user_name, user_path, user_key, terminal, selected_race_car):
     else:
         race_msg += f"Vaya, parece que tu {loser_car["brand"]} {loser_car["model"]} ha perdido👎\nSe te restarán 200 puntos                         \n"
         user_data["points"] -= 200
+    race_msg += "###############################\n"
     race_data.pop(selected_race)
     # Cuando ya acaba la carrera, se elimina esta de la lista de carreras posibles y se vuelven a encriptar los datos del usuario (ya que se han actualizado los puntos)
-    store_data(race_data, race_path)
-    store_encrypted_data(user_data, user_path, user_key, terminal)
     type_text(terminal, "3                                                                                                \n")
     type_text(terminal, "2                                                                                                \n")
     type_text(terminal, "1                                                                                                \n")
     type_text(terminal, "YA!                                               \n")  
     type_text(terminal, race_msg)
+    # Guardamos los datos del usuario y la lista de carreras
+    store_data(race_data, race_path)
+    store_encrypted_data(user_data, user_path, user_key, terminal)
 
-
-# Función auxiliar que descifra la carrera seleccionada
+# Función auxiliar que descifra la carrera seleccionada y verifica la firma 
 def decrypt_selected_race(user_name, terminal, user_key, race_data):
+    global selected_race
     # Desciframos la carrera seleccionada 
     # Primero desciframos la clave simétrica temporal
     user_data = load_data(USERS_PATH)
-    private_key_encrypted = base64.b64decode(user_data[user_name]["private_key"])
+    private_key_encrypted = base64.b64decode(user_data[user_name]["private_key_cod"])
     private_key = desencrypt_data(private_key_encrypted, user_key, terminal, False)
     symmetric_key = decrypt_rsa_message(base64.b64decode(race_data[selected_race]["symmetric_key"]), private_key, terminal)
     # Luego desciframos el coche
     race_car = desencrypt_data(base64.b64decode(race_data[selected_race]["race_car"]), symmetric_key, terminal)
+
+    # Verificamos la firma
+    # Reconstruimos el string JSON para verificar la firma
+    race_car_json = json.dumps(race_car)
+    sign = verify_signature(user_data[race_data[selected_race]["rival"]]["public_key_sign"].encode("ascii"), race_car_json, race_data[selected_race]["signature"], terminal)
+    if not sign:
+        type_text(terminal, "Firma digital incorrecta\n")
+        return
     return race_car
-
-

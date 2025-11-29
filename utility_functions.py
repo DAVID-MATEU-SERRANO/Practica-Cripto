@@ -3,7 +3,9 @@ import json
 import tkinter as tk
 from Crypto.Cipher import AES
 from Crypto.PublicKey import RSA
-from Crypto.Cipher import PKCS1_OAEP 
+from Crypto.Cipher import PKCS1_OAEP
+from Crypto.Signature import pss
+from Crypto.Hash import SHA256
 import base64
 import hashlib
 import os
@@ -16,7 +18,7 @@ typing_after_id = None
 typing_queue = deque()
 
 # FUNCIÓN HASH
-def hash_password(password: str, salt_password: bytes = None) -> tuple:
+def hash_password(password: str, terminal, salt_password: bytes = None, write = True) -> tuple:
     # Genera el hash de la contraseña introducida por el usuario
     if salt_password is None:
         salt_password = os.urandom(16) #El salt se genera aleatoriamente
@@ -27,7 +29,14 @@ def hash_password(password: str, salt_password: bytes = None) -> tuple:
         #Iteramos para que sea más difícil un ataque a fuerza brutas
         value = hashlib.sha256(value).digest()
     
-
+    if write:
+        type_text(terminal, 
+        "HASH SHA-256...\n"
+        f"Salt de 16 bytes para la contraseña generado y aplicado -> {salt_password}\n"
+        f"Aplicando {DEFAULT_ITERATIONS} iteraciones...\n"
+        f"Hash SHA-256 de 32 bytes -> {base64.b64encode(value).decode("ascii")} generado correctamente...\n"
+        "\n")
+    
     return (
         base64.b64encode(salt_password).decode("ascii"),
         base64.b64encode(os.urandom(16)).decode("ascii"), #salt_key (salt para construir la clave de usuario)
@@ -36,33 +45,46 @@ def hash_password(password: str, salt_password: bytes = None) -> tuple:
 
 
 # FUNCIONES PARA GENERAR CLAVES
-def generate_user_key(password: str, salt: bytes) -> bytes:
+def generate_user_key(password: str, salt: bytes, terminal, write = True) -> bytes:
     #Genera una clave a partir de la contraseña de cada usuario -> todos los datos del usuario se cifran con esta clave
     #Se le aplica un salt aleatorio para añadir seguridad (este salt es distinto al que se aplica al hash de la contraseña)
     value = salt + (password).encode("utf-8")
     for _ in range(DEFAULT_ITERATIONS):
         #Iteramos para que sea más difícil un ataque a fuerza brutas
         value = hashlib.sha256(value).digest()
+    
+    if write:
+        type_text(terminal, 
+        "GENERACIÓN CLAVE SIMÉTRICA AES-GCM...\n"
+        f"Salt de 16 bytes para la clave generado y aplicado -> {base64.b64encode(salt).decode("ascii")}\n"
+        f"Aplicando {DEFAULT_ITERATIONS} iteraciones...\n"
+        f"Clave simétrica del usuario generada correctamente...\n"
+    "\n")
 
     return value  # Retornamos la clave AES-256 de 32 bytes
 
-def generate_rsa_keypair(user_key: bytes) -> tuple:
+def generate_rsa_keypair(user_key: bytes, terminal) -> tuple:
     # Generamos las claves RSA
-    key = RSA.generate(4096)
+    key = RSA.generate(2048)
     private_key = key.export_key()
     public_key = key.publickey().export_key()
 
     # Ciframos la clave privada con la clave del usuario
-    cipher, ciphertext, tag = encrypt_data(user_key, private_key)
+    cipher, ciphertext, tag = encrypt_data(user_key, private_key, terminal)
     encrypted_private_key = cipher.nonce + tag + ciphertext
 
+    type_text(terminal, 
+    "GENERACIÓN PAR DE CLAVES RSA-2048...\n"
+    "Clave privada generada correctamente y cifrada con la clave del usuario...\n"
+    f"Clave pública generada correctamente -> {public_key}\n"
+    "\n")
     # Lo devolvemos en base64 para poder guardarlo en json
     return base64.b64encode(encrypted_private_key).decode("ascii"), public_key.decode("ascii")
 
 def generate_random_symmetric_key(terminal) -> bytes:
     # Generamos la clave simétrica temporal para el cifrado híbrido (AES-256 GCM)
     type_text(terminal, 
-            "Generando clave simétrica temporal...\n"
+            "GENERACIÓN CLAVE SIMÉTRICA TEMPORAL...\n"
             "Clave simétrica temporal generada correctamente\n"
             "\n") 
     return os.urandom(32)
@@ -80,12 +102,12 @@ def desencrypt_data(file_bytes, key, terminal, decode=True):
         # Nos aseguramos de que el tag sea el mismo de cuando se cifró ya que si no, significa que alguien ha modificado el documento
         plaintext = cipher.decrypt_and_verify(ciphertext, tag) 
         type_text(terminal, 
-            "Desencriptando archivo del usuario...\n"
+            "DESCIFRADO SIMÉTRICO con AES-256 GCM...\n"
             f"Nonce extraído: {base64.b64encode(nonce).decode('ascii')}\n"
             f"Tag de autenticidad extraído: {base64.b64encode(tag).decode('ascii')}\n"
-            f"Verificación MAC exitosa\n"
-            f"Desencriptación con AES-256 GCM exitosa\n"
-            "\n") #Los espacios son para q tarde un tiempo en saltar al siguient mensaje en cola
+            "Verificación MAC exitosa\n"
+            "Desencriptación simétrica exitosa\n"
+            "\n") 
         if decode:
             return json.loads(plaintext.decode("utf-8")) # Se devuelve el texto ya desencriptado
         else:
@@ -93,14 +115,20 @@ def desencrypt_data(file_bytes, key, terminal, decode=True):
             
     except ValueError:
         #Eso significa que la autenticación ha fallado o que las claves no son las mismas
-        print(f"USADA_KEY ->>> {key}")
         type_text(terminal, "ERROR GRAVE: las claves de cifrado y descifrado no coinciden o alguien ha modificado el archivo\n") 
         return None
 
-def encrypt_data(key, plaintext):
+def encrypt_data(key, plaintext, terminal):
     # A partir de una clave y un texto (en bits) se encripta
     cipher = AES.new(key, AES.MODE_GCM)
     ciphertext, tag = cipher.encrypt_and_digest(plaintext)
+    type_text(terminal, 
+    "CIFRADO SIMÉTRICO con AES-256 GCM...\n"
+    f"Usando nonce generado aleatoriamente -> {base64.b64encode(cipher.nonce).decode("ascii")}\n"
+    f"Usada clave del usuario de 32 bytes... \n"
+    f"Generado tag de autenticacion {base64.b64encode(tag).decode("ascii")}\n"
+    "Encriptación simétrica exitosa\n"
+    "\n")
     return cipher,ciphertext,tag #Devolvemos la información adicional para guardarla luego
 
 
@@ -109,25 +137,19 @@ def encrypt_data(key, plaintext):
 def load_encrypted_data(filepath: str, key: bytes, terminal) -> dict:
     with open(filepath, "rb") as f:
         file_bytes = f.read()
+    type_text(terminal, "Datos encriptados cargados correctamente\n")
     return desencrypt_data(file_bytes, key, terminal)
     
 
 def store_encrypted_data(data: dict, filepath: str, key: bytes, terminal):
     plaintext = json.dumps(data).encode("utf-8") 
-    cipher, ciphertext, tag = encrypt_data(key, plaintext)
+    cipher, ciphertext, tag = encrypt_data(key, plaintext, terminal)
     
     # Guardamos nonce + tag + ciphertext en binario
     with open(filepath, "wb") as f:
         f.write(cipher.nonce + tag + ciphertext)
 
-    type_text(terminal, 
-                  "Encriptando archivo del usuario...\n"
-                  f"Usando nonce generado aleatoriamente -> {base64.b64encode(cipher.nonce).decode("ascii")}\n"
-                  f"Usada clave para AES-GCM de 32 bytes... \n"
-                  f"Generado tag de autenticacion {base64.b64encode(tag).decode("ascii")}\n"
-                  f"Encriptación con AES-256 GCM exitosa\n"
-                  "Datos del usuario guardados correctamente\n"
-                  "\n") 
+    type_text(terminal, "Datos encriptados guardados correctamente\n") 
 
 #Funcion load/store estandar (para cuando no hay que usar nada de cifrado)
 def load_data(path: str) -> dict:
@@ -197,28 +219,80 @@ def upgrade_exists(upgrade:str, user_data:dict, car_pos:int):
     return False
 
 
-# FUNCIONES DE CIFRADO ASIMÉTRICO (RSA)
+# FUNCIONES DE CIFRADO ASIMÉTRICO (RSA - 2048 bits OAEP)
 def encrypt_rsa_message(message: bytes, public_key_str: str, terminal) -> bytes:
+    # Ciframos el mensaje con la clave pública
     public_key = RSA.import_key(public_key_str)
     cipher_rsa = PKCS1_OAEP.new(public_key)
     encrypted_message = cipher_rsa.encrypt(message)
     type_text(terminal, 
-                  "Encriptando clave simétrica temporal...\n"
-                  "Buscando clave pública del rival...\n"
-                  f"Usando clave pública del rival -> {public_key_str}\n"
-                  f"Encriptación con RSA OAEP exitosa\n"
-                  "\n") 
+                "CIFRADO ASIMÉTRICO con RSA-2048 OAEP...\n"
+                f"Usando clave pública del rival-> {public_key_str}\n"
+                "Encriptación con RSA OAEP exitosa\n"
+                "\n") 
     
     return encrypted_message
 
 def decrypt_rsa_message(encrypted_message: bytes, private_key_str: str, terminal) -> bytes:
+    # Desciframos el mensaje con la clave privada
     private_key = RSA.import_key(private_key_str)
     cipher_rsa = PKCS1_OAEP.new(private_key)
     decrypted_message = cipher_rsa.decrypt(encrypted_message)
     type_text(terminal, 
-                  "Desencriptando clave simétrica temporal...\n"
-                  "Usando clave privada...\n"
-                  f"Desencriptación con RSA OAEP exitosa\n"
-                  "\n") 
+                "DESCIFRADO ASIMÉTRICO con RSA-2048 OAEP...\n"
+                "Usando clave privada propia...\n"
+                "Desencriptación con RSA OAEP exitosa\n"
+                "\n") 
     
     return decrypted_message
+
+# FUNCIONES DE FIRMA DIGITAL (RSASSA-PSS)
+def sign_message(private_key_bytes: bytes, message: str, terminal) -> str:
+    # Cargamos la clave privada de firma
+    signing_key = RSA.import_key(private_key_bytes)
+    
+    # Calculamos el hash del mensaje (SHA-256)
+    h = SHA256.new(message.encode('utf-8'))
+    
+    # Firmamos el hash usando RSASSA-PSS (añade padding y salt)
+    signer = pss.new(signing_key)
+    signature = signer.sign(h)
+    type_text(terminal, 
+                  "GENERACIÓN DE FIRMA DIGITAL RSASSA-PSS...\n"
+                  "Usando clave privada propia...\n"
+                  f"Firma digital generada exitosamente --> {base64.b64encode(signature).decode('ascii')}\n"
+                  "\n") 
+
+    return base64.b64encode(signature).decode('ascii')
+    
+def verify_signature(public_key_bytes: bytes, message: str, signature_b64: str, terminal) -> bool:
+    try:
+        # Cargamos la clave pública
+        verification_key = RSA.import_key(public_key_bytes)
+        
+        signature_bytes = base64.b64decode(signature_b64)
+        
+        # Recalcular el hash del mensaje recibido
+        h = SHA256.new(message.encode('utf-8'))
+        
+        verifier = pss.new(verification_key)
+        
+        # Verificar la firma (lanza excepción si no es válida)
+        verifier.verify(h, signature_bytes)
+        
+        type_text(terminal, 
+                  "VERIFICACIÓN DE FIRMA DIGITAL RSASSA-PSS...\n"
+                  "Usando clave pública del rival...\n"
+                  f"Firma digital verificada exitosamente --> {signature_b64}\n"
+                  "\n") 
+        
+        return True
+        
+    except (ValueError, TypeError):
+        # La firma no era correcta
+        type_text(terminal, 
+                  "VERIFICACIÓN DE FIRMA DIGITAL RSASSA-PSS...\n"
+                  "Usando clave pública...\n"
+                  f"Firma digital verificada incorrectamente --> {signature_b64}\n"
+                  "\n") 
+        return False

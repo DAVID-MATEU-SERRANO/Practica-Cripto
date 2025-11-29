@@ -238,12 +238,16 @@ def register_user(username: str, password: str, terminal):
         type_text(terminal, "Debe introducir una contraseña válida\nEsta debe contener al menos 1 mayúscula, 1 número, un símbolo (-, _) y tener una longitud mínima de 12")
         return 
 
+    terminal.delete("1.0", tk.END)
+
     # Generamos hash password
-    salt_password, salt_key, hash_b64 = hash_password(password)
+    salt_password, salt_key, hash_b64 = hash_password(password, terminal)
     # Generamos clave a partir de la contraseña del usuario y encriptamos
-    user_key = generate_user_key(password, base64.b64decode(salt_key))  
-    # Generamos la clave pública y la privada del usuario (la privada ya viene cifrada con la clave del usuario)
-    private_key, public_key = generate_rsa_keypair(user_key)
+    user_key = generate_user_key(password, base64.b64decode(salt_key), terminal)  
+    # Generamos la clave pública y la privada del usuario (la privada ya viene cifrada con la clave del usuario) -> estas se usarán para en cifrado híbrido
+    private_key_cod, public_key_cod = generate_rsa_keypair(user_key, terminal)
+    # Generamos la clave pública y la privada del usuario (la privada ya viene cifrada con la clave del usuario) -> estas se usarán para firmar datos
+    private_key_sign, public_key_sign = generate_rsa_keypair(user_key, terminal)
 
     # Añadimos los datos del usuario a users.json
     users_auth = load_data(USERS_PATH)
@@ -251,11 +255,11 @@ def register_user(username: str, password: str, terminal):
         "salt_password": salt_password,
         "salt_key": salt_key,
         "hash": hash_b64,
-        "private_key": private_key,
-        "public_key": public_key
+        "private_key_cod": private_key_cod,
+        "public_key_cod": public_key_cod,
+        "private_key_sign": private_key_sign,
+        "public_key_sign": public_key_sign
     }
-
-
 
     store_data(users_auth, USERS_PATH)
 
@@ -264,25 +268,12 @@ def register_user(username: str, password: str, terminal):
     user_data = load_data(USER_DATA_PATH)
     user_data["username"] = username
     user_data["garage"] = []
+    # TODO: Cambiar los puntos iniciales a 200
     user_data["points"] = 2000000000
 
-    terminal.delete("1.0", tk.END)
-    type_text(terminal, (
-    f"Salt de 16 bytes para la contraseña generado y aplicado -> {salt_password}\n"
-    f"Aplicando {DEFAULT_ITERATIONS} iteraciones...\n"
-    f"Hash SHA-256 de 32 bytes -> {hash_b64} generado correctamente...\n"
-    f"Generando clave para AES-GCM de 32 bytes...\n"
-    f"Salt de 16 bytes para la clave generado y aplicado -> {salt_key}\n"
-    f"Aplicando {DEFAULT_ITERATIONS} iteraciones...\n"
-    "Clave del usuario generada correctamente...\n"
-    "Generando par de claves de 2048 bits RSA-2048...\n"
-    "Clave privada cifrada con la clave del usuario...\n"
-    f"Clave pública generada correctamente -> {public_key}\n"
-    "Datos registrados correctamente!\n"
-    "\n"))
-
-    
     store_encrypted_data(user_data, USER_DATA_PATH, user_key, terminal)
+
+    type_text(terminal, "Registro completado con éxito\n")
 
 
 
@@ -306,13 +297,13 @@ def login_user(username: str, password: str, terminal, root):
     stored_hash = user_data["hash"]
     salt_password = base64.b64decode(salt_password)
 
-    _, _,computed_hash = hash_password(password, salt_password)
+    _, _,computed_hash = hash_password(password, terminal, salt_password, write=False)
 
     if computed_hash == stored_hash:
         USER_DATA_PATH = f"User_data/{username}_data.json"
-        user_key = generate_user_key(password, base64.b64decode(user_data["salt_key"]))
+        user_key = generate_user_key(password, base64.b64decode(user_data["salt_key"]), terminal, write=False)
         root.destroy()
-        show_secondary_menu(USER_DATA_PATH, username, user_key)
+        show_secondary_menu(USER_DATA_PATH, username, user_key) 
         return
     else:
         terminal.delete("1.0", tk.END)
