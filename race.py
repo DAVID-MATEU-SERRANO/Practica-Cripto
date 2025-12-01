@@ -1,4 +1,6 @@
 #race.py
+from Crypto.PublicKey import RSA
+from utility_functions import check_user_certificate
 from utility_functions import verify_signature
 from utility_functions import sign_message
 from utility_functions import decrypt_rsa_message
@@ -25,8 +27,13 @@ def create_race(rival, race_car_data, user_name, terminal, user_key):
     user_data = load_data(USERS_PATH)
     # Antes de cifrar nada, firmamos el mensaje
     # Obtenemos la clave privada del usuario
-    private_key_encrypted = base64.b64decode(user_data[user_name]["private_key_sign"])
-    private_key = desencrypt_data(private_key_encrypted, user_key, terminal, False)
+    with open(f"PKI/Users/{user_name}/sign/private_sign.pem", 'rb') as f:
+        encrypted_key_pem = f.read()
+
+    private_key = RSA.import_key(
+            encrypted_key_pem,
+            passphrase=user_key.hex()
+        )
 
     # Firmamos el mensaje 
     race_car_json = json.dumps(race_car_data)
@@ -35,8 +42,11 @@ def create_race(rival, race_car_data, user_name, terminal, user_key):
     
     # Dentro del mensaje el campo de race_car va encriptado usando el cifrado híbrido
     # Primer obtenemos la clave pública del rival (la que se usa para cifrar)
-    rival_public_key = user_data[rival]["public_key_cod"].encode('ascii')
-
+    rival_public_key = check_user_certificate(rival, "cod", terminal)
+    if not rival_public_key:
+        type_text(terminal, "La certificación de la clave pública del rival no es correcta\n")
+        return
+    
     # Generamos la clave simétrica temporal para el cifrado híbrido (AES-256 GCM)
     symmetric_key = generate_random_symmetric_key(terminal)
     
@@ -220,9 +230,14 @@ def decrypt_selected_race(user_name, terminal, user_key, race_data):
     global selected_race
     # Desciframos la carrera seleccionada 
     # Primero desciframos la clave simétrica temporal
-    user_data = load_data(USERS_PATH)
-    private_key_encrypted = base64.b64decode(user_data[user_name]["private_key_cod"])
-    private_key = desencrypt_data(private_key_encrypted, user_key, terminal, False)
+    with open(f"PKI/Users/{user_name}/cod/private_cod.pem", 'rb') as f:
+        encrypted_key_pem = f.read()
+
+    private_key = RSA.import_key(
+            encrypted_key_pem,
+            passphrase=user_key.hex()
+        )
+
     symmetric_key = decrypt_rsa_message(base64.b64decode(race_data[selected_race]["symmetric_key"]), private_key, terminal)
     # Luego desciframos el coche
     race_car = desencrypt_data(base64.b64decode(race_data[selected_race]["race_car"]), symmetric_key, terminal)
@@ -230,7 +245,11 @@ def decrypt_selected_race(user_name, terminal, user_key, race_data):
     # Verificamos la firma
     # Reconstruimos el string JSON para verificar la firma
     race_car_json = json.dumps(race_car)
-    sign = verify_signature(user_data[race_data[selected_race]["rival"]]["public_key_sign"].encode("ascii"), race_car_json, race_data[selected_race]["signature"], terminal)
+    rival_public_key = check_user_certificate(race_data[selected_race]["rival"], "sign", terminal)
+    if not rival_public_key:
+        type_text(terminal, "La certificación de la clave pública del rival no es correcta\n")
+        return
+    sign = verify_signature(rival_public_key, race_car_json, race_data[selected_race]["signature"], terminal)
     if not sign:
         type_text(terminal, "Firma digital incorrecta\n")
         return

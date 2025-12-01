@@ -250,10 +250,9 @@ def encrypt_rsa_message(message: bytes, public_key_str: str, terminal) -> bytes:
     
     return encrypted_message
 
-def decrypt_rsa_message(encrypted_message: bytes, private_key_str: str, terminal) -> bytes:
+def decrypt_rsa_message(encrypted_message: bytes, private_key_obj: RSA.RsaKey, terminal) -> bytes:
     # Desciframos el mensaje con la clave privada
-    private_key = RSA.import_key(private_key_str)
-    cipher_rsa = PKCS1_OAEP.new(private_key)
+    cipher_rsa = PKCS1_OAEP.new(private_key_obj)
     decrypted_message = cipher_rsa.decrypt(encrypted_message)
     type_text(terminal, 
                 "DESCIFRADO ASIMÉTRICO con RSA-2048 OAEP...\n"
@@ -264,15 +263,13 @@ def decrypt_rsa_message(encrypted_message: bytes, private_key_str: str, terminal
     return decrypted_message
 
 # FUNCIONES DE FIRMA DIGITAL (RSASSA-PSS)
-def sign_message(private_key_bytes: bytes, message: str, terminal) -> str:
-    # Cargamos la clave privada de firma
-    signing_key = RSA.import_key(private_key_bytes)
+def sign_message(private_key_obj: RSA.RsaKey, message: str, terminal) -> str:
     
     # Calculamos el hash del mensaje (SHA-256)
     h = SHA256.new(message.encode('utf-8'))
     
     # Firmamos el hash usando RSASSA-PSS (añade padding y salt)
-    signer = pss.new(signing_key)
+    signer = pss.new(private_key_obj)
     signature = signer.sign(h)
     type_text(terminal, 
                   "GENERACIÓN DE FIRMA DIGITAL RSASSA-PSS...\n"
@@ -314,7 +311,7 @@ def verify_signature(public_key_bytes: bytes, message: str, signature_b64: str, 
                   "\n") 
         return False
 
-## FUNCIONES DE CERTIFICADOS OPENSSL
+## FUNCIONES DE CERTIFICADOS X509 (OpenSSL)
 def create_user_certificate(username: str, user_key: bytes, key_type: str, terminal):
     """
     Genera un CSR (Certificate Signing Request) usando OpenSSL y lo envía a AC2 para firmarlo. AC2 lo firma y 
@@ -327,7 +324,7 @@ def create_user_certificate(username: str, user_key: bytes, key_type: str, termi
     
     # Campos del certificado
     email = f"{username}@criptoracers.es"
-    subject = f"/C=ES/ST=MADRID/O=Cryptoracers - Fundacion/CN={username}/emailAddress={email}"
+    subject = f"/C=ES/ST=MADRID/O=Cryptoracers - Fundacion/CN={username}_{key_type}/emailAddress={email}"
     
     # Generar el CSR
     cmd_csr = [
@@ -346,13 +343,12 @@ def create_user_certificate(username: str, user_key: bytes, key_type: str, termi
         return None
     except Exception as e:
         type_text(terminal, f"ERROR inesperado en CSR: {str(e)}\n")
-        return None
-    
+        return None    
     # Copiar CSR a AC2/solicitudes
     ac2_solicitudes = "PKI/AC2/solicitudes"
     dest_csr = f"{ac2_solicitudes}/{username}_{key_type}_req.pem"
     subprocess.run(["cp", csr_path, dest_csr], capture_output=True, text=True, check=True)
-
+    
     #Leer la solicitud del certificado
     # Leer el contenido de la solicitud (CSR)
     cmd_read_csr = [
@@ -371,7 +367,7 @@ def create_user_certificate(username: str, user_key: bytes, key_type: str, termi
         "-out", f"./nuevoscerts/{username}_{key_type}_cert.pem", "-notext",
         "-config", "openssl_AC2.cnf",
         "-passin", "pass:cripto_racers_private_key_password_ac2",
-        "-batch"  
+        "-batch", "-policy", "policy_anything"
     ]
     
     try:
@@ -404,3 +400,42 @@ def create_user_certificate(username: str, user_key: bytes, key_type: str, termi
     f"{cert_content}\n"
     "Certificado guardado correctamente\n"
     "\n")
+
+def check_user_certificate(username: str, key_type: str, terminal):
+    """
+    Comprueba que el certificado del usuario es válido (cadena de confianza)
+    """
+    public_key = None
+
+    cmd_cp_ac1 = ["cp", "PKI/AC1/ac1cert.pem", "./"]
+    subprocess.run(cmd_cp_ac1, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    cmd_cp_ac2 = ["cp", "PKI/AC2/ac2cert.pem", "./"]
+    subprocess.run(cmd_cp_ac2, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    with open("certs.pem", "wb") as outfile:
+        with open("ac1cert.pem", "rb") as infile_ac1:
+            outfile.write(infile_ac1.read())
+        with open("ac2cert.pem", "rb") as infile_ac2:
+            outfile.write(infile_ac2.read())
+
+    cmd_verify = ["openssl", "verify", "-CAfile", "certs.pem", f"PKI/Users/{username}/{key_type}/{username}_{key_type}_cert.pem"]
+    result = subprocess.run(cmd_verify, capture_output=True, text=True, check=True)
+    if "OK" in result.stdout:
+        cmd_pubkey_extract = [
+                "openssl", "x509", 
+                "-in", f"PKI/Users/{username}/{key_type}/{username}_{key_type}_cert.pem", 
+                "-pubkey", # Opción para extraer la clave pública
+                "-noout"   # Opción para no mostrar el resto del certificado
+            ]
+            
+        # Ejecutar y capturar la clave pública
+        result_pubkey = subprocess.run(
+                cmd_pubkey_extract, 
+                capture_output=True, 
+                check=True, 
+                text=True # Usar text=True para obtener la salida como string (PEM)
+            )
+        public_key = result_pubkey.stdout.encode('utf-8')    # Borrar archivos temporales
+    rm_certs = ["rm", "ac1cert.pem", "ac2cert.pem", "certs.pem"]
+    subprocess.run(rm_certs, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    type_text(terminal, "Certificado verificado correctamente\n")
+    return public_key

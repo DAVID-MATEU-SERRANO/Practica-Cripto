@@ -1,0 +1,12 @@
+{
+  "user_1": {
+    "salt_password": "ZKU9yZ2UvNO0tO3Ck98GAA==",
+    "salt_key": "SNp66IGttk4XpAFZy3m98w==",
+    "hash": "T4KA0zwwhdyYppHn38LEq9A7foynaBCpyul5mGEsFf8="
+  },
+  "user_2": {
+    "salt_password": "6DOwZ0fdUs+nzkY+TMIYtQ==",
+    "salt_key": "7v1FnoWzZltRRDo4EzXcTg==",
+    "hash": "xMET3TZNivAZasw3LWUrtmDPfOBG7kEn02iExwhJNAU="
+  }
+}

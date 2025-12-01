@@ -249,7 +249,7 @@ def register_user(username: str, password: str, terminal):
     # Generamos la clave pública y la privada del usuario (la privada ya viene cifrada con la clave del usuario) -> estas se usarán para firmar datos
     generate_rsa_keypair(user_key, terminal, username, "sign")
     
-    # --- PKI: Generar certificados firmados por AC2 ---
+    # PKI: Generar certificados firmados por AC2 
     create_user_certificate(username, user_key, "cod", terminal)
     create_user_certificate(username, user_key, "sign", terminal)
 
