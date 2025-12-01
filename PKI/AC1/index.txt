@@ -1,0 +1,1 @@
+V	261201184600Z		01	unknown	/C=ES/ST=MADRID/O=Cryptoracers - Fundacion/OU=PKI Root/CN=Cryptoracers Root CA (AC1)/emailAddress=pki.root@cryptoracers.com

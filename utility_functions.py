@@ -11,6 +11,7 @@ import hashlib
 import os
 from collections import deque
 from const import DEFAULT_ITERATIONS
+import subprocess
 
 #VARIABLES GLOBALES para la función type_text
 typing_after_id = None
@@ -63,23 +64,39 @@ def generate_user_key(password: str, salt: bytes, terminal, write = True) -> byt
 
     return value  # Retornamos la clave AES-256 de 32 bytes
 
-def generate_rsa_keypair(user_key: bytes, terminal) -> tuple:
-    # Generamos las claves RSA
+def generate_rsa_keypair(user_key: bytes, terminal, username: str, key_type: str) -> tuple:
+    # Generamos las claves RSA (las guardamos en .pem para luego poder usarlas con OpenSSL)
     key = RSA.generate(2048)
-    private_key = key.export_key()
-    public_key = key.publickey().export_key()
 
-    # Ciframos la clave privada con la clave del usuario
-    cipher, ciphertext, tag = encrypt_data(user_key, private_key, terminal)
-    encrypted_private_key = cipher.nonce + tag + ciphertext
+    # Exportar la clave privada CIFRADA en formato PEM OpenSSL (PKCS#8)
+    encrypted_private_key_pem = key.export_key(
+        passphrase=user_key.hex(), 
+        pkcs=8, 
+        protection="scryptAndAES256-CBC" 
+    )
+    # Exportar la clave pública en formato PEM
+    public_key_pem = key.publickey().export_key()
 
+    # Construir rutas
+    base_path = f"PKI/Users/{username}/{key_type}"
+    ruta_privada = f"{base_path}/private_{key_type}.pem"
+    ruta_publica = f"{base_path}/public_{key_type}.pem"
+
+    # Crear carpetas si no existen
+    os.makedirs(base_path, exist_ok=True)
+    
+    # Guardado de claves
+    with open(ruta_privada, 'wb') as f:
+        f.write(encrypted_private_key_pem)
+    
+    with open(ruta_publica, 'wb') as f:
+        f.write(public_key_pem)
+    
     type_text(terminal, 
     "GENERACIÓN PAR DE CLAVES RSA-2048...\n"
-    "Clave privada generada correctamente y cifrada con la clave del usuario...\n"
-    f"Clave pública generada correctamente -> {public_key}\n"
+    f"Clave privada generada, cifrada con estándar OpenSSL con clave del usuario...\n"
+    f"Clave pública generada...\n"
     "\n")
-    # Lo devolvemos en base64 para poder guardarlo en json
-    return base64.b64encode(encrypted_private_key).decode("ascii"), public_key.decode("ascii")
 
 def generate_random_symmetric_key(terminal) -> bytes:
     # Generamos la clave simétrica temporal para el cifrado híbrido (AES-256 GCM)
@@ -296,3 +313,94 @@ def verify_signature(public_key_bytes: bytes, message: str, signature_b64: str, 
                   f"Firma digital verificada incorrectamente --> {signature_b64}\n"
                   "\n") 
         return False
+
+## FUNCIONES DE CERTIFICADOS OPENSSL
+def create_user_certificate(username: str, user_key: bytes, key_type: str, terminal):
+    """
+    Genera un CSR (Certificate Signing Request) usando OpenSSL y lo envía a AC2 para firmarlo. AC2 lo firma y 
+    envía el certificado firmado al usuario. 
+    """
+    user_dir = f"PKI/Users/{username}/{key_type}"
+    private_key_path = f"{user_dir}/private_{key_type}.pem"
+    csr_path = f"{user_dir}/{username}_{key_type}_req.pem"
+    cert_path = f"{user_dir}/{username}_{key_type}_cert.pem"
+    
+    # Campos del certificado
+    email = f"{username}@criptoracers.es"
+    subject = f"/C=ES/ST=MADRID/O=Cryptoracers - Fundacion/CN={username}/emailAddress={email}"
+    
+    # Generar el CSR
+    cmd_csr = [
+        "openssl", "req",
+        "-new",
+        "-key", private_key_path,
+        "-out", csr_path,
+        "-subj", subject,
+        "-passin", f"pass:{user_key.hex()}"  
+    ]
+    
+    try:
+        subprocess.run(cmd_csr, capture_output=True, text=True, check=True)
+    except subprocess.CalledProcessError as e:
+        type_text(terminal, f"ERROR generando CSR: {e.stderr}\n")
+        return None
+    except Exception as e:
+        type_text(terminal, f"ERROR inesperado en CSR: {str(e)}\n")
+        return None
+    
+    # Copiar CSR a AC2/solicitudes
+    ac2_solicitudes = "PKI/AC2/solicitudes"
+    dest_csr = f"{ac2_solicitudes}/{username}_{key_type}_req.pem"
+    subprocess.run(["cp", csr_path, dest_csr], capture_output=True, text=True, check=True)
+
+    #Leer la solicitud del certificado
+    # Leer el contenido de la solicitud (CSR)
+    cmd_read_csr = [
+        "openssl", "req",
+        "-in", f"./solicitudes/{username}_{key_type}_req.pem",
+        "-text",
+        "-noout"
+    ]
+    result = subprocess.run(cmd_read_csr, cwd="PKI/AC2", capture_output=True, text=True, check=True)
+    csr_content = result.stdout  
+
+    # Comando para firmar (ejecutado desde el directorio de AC2)
+    cmd_sign = [
+        "openssl", "ca",
+        "-in", f"./solicitudes/{username}_{key_type}_req.pem",
+        "-out", f"./nuevoscerts/{username}_{key_type}_cert.pem", "-notext",
+        "-config", "openssl_AC2.cnf",
+        "-passin", "pass:cripto_racers_private_key_password_ac2",
+        "-batch"  
+    ]
+    
+    try:
+        subprocess.run(cmd_sign, cwd="PKI/AC2", capture_output=True, text=True, check=True)
+        type_text(terminal, f"Certificado firmado por AC2 correctamente\n")
+    except subprocess.CalledProcessError as e:
+        type_text(terminal, f"Error firmando certificado: {e.stderr}\n")
+        return None
+
+    # Leer el contenido del certificado firmado
+    cmd_read_cert = [
+        "openssl", "x509",
+        "-in", f"./nuevoscerts/{username}_{key_type}_cert.pem",
+        "-text",
+        "-noout"
+    ]
+    result = subprocess.run(cmd_read_cert, cwd="PKI/AC2", capture_output=True, text=True, check=True)
+    cert_content = result.stdout
+    
+    # Copiar certificado firmado a la carpeta del usuario
+    signed_cert_source = f"PKI/AC2/nuevoscerts/{username}_{key_type}_cert.pem"
+    subprocess.run(["cp", signed_cert_source, cert_path], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    type_text(terminal, 
+    f"CREACIÓN DE CERTIFICADO X.509 PARA {username}...\n"
+    "Solicitud del certificado generada correctamente:\n"
+    f"{csr_content}\n"
+    "Enviando solicitud al AC2...\n"
+    "Firma del certificado por AC2 exitosa:\n"
+    f"{cert_content}\n"
+    "Certificado guardado correctamente\n"
+    "\n")

@@ -3,7 +3,7 @@ import base64
 import tkinter as tk
 from tkinter import font as tkfont
 from const import DEFAULT_ITERATIONS, USERS_PATH
-from utility_functions import generate_rsa_keypair, generate_user_key, hash_password, load_data, store_data, store_encrypted_data, type_text, user_exists
+from utility_functions import create_user_certificate, generate_rsa_keypair, generate_user_key, hash_password, load_data, store_data, store_encrypted_data, type_text, user_exists
 import re
 from main_windows import show_secondary_menu
 
@@ -245,9 +245,13 @@ def register_user(username: str, password: str, terminal):
     # Generamos clave a partir de la contraseña del usuario y encriptamos
     user_key = generate_user_key(password, base64.b64decode(salt_key), terminal)  
     # Generamos la clave pública y la privada del usuario (la privada ya viene cifrada con la clave del usuario) -> estas se usarán para en cifrado híbrido
-    private_key_cod, public_key_cod = generate_rsa_keypair(user_key, terminal)
+    generate_rsa_keypair(user_key, terminal, username, "cod")
     # Generamos la clave pública y la privada del usuario (la privada ya viene cifrada con la clave del usuario) -> estas se usarán para firmar datos
-    private_key_sign, public_key_sign = generate_rsa_keypair(user_key, terminal)
+    generate_rsa_keypair(user_key, terminal, username, "sign")
+    
+    # --- PKI: Generar certificados firmados por AC2 ---
+    create_user_certificate(username, user_key, "cod", terminal)
+    create_user_certificate(username, user_key, "sign", terminal)
 
     # Añadimos los datos del usuario a users.json
     users_auth = load_data(USERS_PATH)
@@ -255,10 +259,6 @@ def register_user(username: str, password: str, terminal):
         "salt_password": salt_password,
         "salt_key": salt_key,
         "hash": hash_b64,
-        "private_key_cod": private_key_cod,
-        "public_key_cod": public_key_cod,
-        "private_key_sign": private_key_sign,
-        "public_key_sign": public_key_sign
     }
 
     store_data(users_auth, USERS_PATH)
