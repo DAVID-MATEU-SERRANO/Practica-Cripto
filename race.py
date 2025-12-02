@@ -24,7 +24,6 @@ def create_race(rival, race_car_data, user_name, terminal, user_key):
     if race_data == {}:
         race_data = []
 
-    user_data = load_data(USERS_PATH)
     # Antes de cifrar nada, firmamos el mensaje
     # Obtenemos la clave privada del usuario
     with open(f"PKI/Users/{user_name}/sign/private_sign.pem", 'rb') as f:
@@ -42,7 +41,9 @@ def create_race(rival, race_car_data, user_name, terminal, user_key):
     
     # Dentro del mensaje el campo de race_car va encriptado usando el cifrado híbrido
     # Primer obtenemos la clave pública del rival (la que se usa para cifrar)
-    rival_public_key = check_user_certificate(rival, "cod", terminal)
+    rival_data = load_data(USERS_PATH)
+    rival_ac_name = rival_data[rival]["ac_name"] # Obtenemos el nombre del AC subordinado del rival
+    rival_public_key = check_user_certificate(rival, "cod", terminal, rival_ac_name)
     if not rival_public_key:
         type_text(terminal, "La certificación de la clave pública del rival no es correcta\n")
         return
@@ -245,7 +246,9 @@ def decrypt_selected_race(user_name, terminal, user_key, race_data):
     # Verificamos la firma
     # Reconstruimos el string JSON para verificar la firma
     race_car_json = json.dumps(race_car)
-    rival_public_key = check_user_certificate(race_data[selected_race]["rival"], "sign", terminal)
+    rival_data = load_data(USERS_PATH)
+    rival_ac_name = rival_data[race_data[selected_race]["rival"]]["ac_name"] # Obtenemos el nombre del AC subordinado del rival
+    rival_public_key = check_user_certificate(race_data[selected_race]["rival"], "sign", terminal, rival_ac_name)
     if not rival_public_key:
         type_text(terminal, "La certificación de la clave pública del rival no es correcta\n")
         return

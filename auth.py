@@ -240,6 +240,14 @@ def register_user(username: str, password: str, terminal):
 
     terminal.delete("1.0", tk.END)
 
+    # Primer asignamos la AC subordinada correspondiente (vamos a ir alternando para cada usuario)
+    users_auth = load_data(USERS_PATH)
+    
+    if len(users_auth) % 2 == 0:
+        ac_name = "AC2"
+    else:
+        ac_name = "AC3" 
+    
     # Generamos hash password
     salt_password, salt_key, hash_b64 = hash_password(password, terminal)
     # Generamos clave a partir de la contraseña del usuario y encriptamos
@@ -250,15 +258,15 @@ def register_user(username: str, password: str, terminal):
     generate_rsa_keypair(user_key, terminal, username, "sign")
     
     # PKI: Generar certificados firmados por AC2 
-    create_user_certificate(username, user_key, "cod", terminal)
-    create_user_certificate(username, user_key, "sign", terminal)
+    create_user_certificate(username, user_key, "cod", terminal, ac_name)
+    create_user_certificate(username, user_key, "sign", terminal, ac_name)
 
     # Añadimos los datos del usuario a users.json
-    users_auth = load_data(USERS_PATH)
     users_auth[username] = {
         "salt_password": salt_password,
         "salt_key": salt_key,
         "hash": hash_b64,
+        "ac_name": ac_name,
     }
 
     store_data(users_auth, USERS_PATH)

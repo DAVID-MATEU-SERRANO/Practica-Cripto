@@ -312,10 +312,10 @@ def verify_signature(public_key_bytes: bytes, message: str, signature_b64: str, 
         return False
 
 ## FUNCIONES DE CERTIFICADOS X509 (OpenSSL)
-def create_user_certificate(username: str, user_key: bytes, key_type: str, terminal):
+def create_user_certificate(username: str, user_key: bytes, key_type: str, terminal, ac_name: str):
     """
-    Genera un CSR (Certificate Signing Request) usando OpenSSL y lo envía a AC2 para firmarlo. AC2 lo firma y 
-    envía el certificado firmado al usuario. 
+    Genera un CSR (Certificate Signing Request) usando OpenSSL y lo envía a ACsubordinada para firmarlo. 
+    ACsubordinada lo firma y envía el certificado firmado al usuario. 
     """
     user_dir = f"PKI/Users/{username}/{key_type}"
     private_key_path = f"{user_dir}/private_{key_type}.pem"
@@ -344,9 +344,9 @@ def create_user_certificate(username: str, user_key: bytes, key_type: str, termi
     except Exception as e:
         type_text(terminal, f"ERROR inesperado en CSR: {str(e)}\n")
         return None    
-    # Copiar CSR a AC2/solicitudes
-    ac2_solicitudes = "PKI/AC2/solicitudes"
-    dest_csr = f"{ac2_solicitudes}/{username}_{key_type}_req.pem"
+    # Copiar CSR a ACsubordinada/solicitudes
+    ac_sub_solicitudes = f"PKI/{ac_name}/solicitudes"
+    dest_csr = f"{ac_sub_solicitudes}/{username}_{key_type}_req.pem"
     subprocess.run(["cp", csr_path, dest_csr], capture_output=True, text=True, check=True)
     
     #Leer la solicitud del certificado
@@ -357,22 +357,22 @@ def create_user_certificate(username: str, user_key: bytes, key_type: str, termi
         "-text",
         "-noout"
     ]
-    result = subprocess.run(cmd_read_csr, cwd="PKI/AC2", capture_output=True, text=True, check=True)
+    result = subprocess.run(cmd_read_csr, cwd=f"PKI/{ac_name}", capture_output=True, text=True, check=True)
     csr_content = result.stdout  
 
-    # Comando para firmar (ejecutado desde el directorio de AC2)
+    # Comando para firmar (ejecutado desde el directorio de AC subordinada)
     cmd_sign = [
         "openssl", "ca",
         "-in", f"./solicitudes/{username}_{key_type}_req.pem",
         "-out", f"./nuevoscerts/{username}_{key_type}_cert.pem", "-notext",
-        "-config", "openssl_AC2.cnf",
-        "-passin", "pass:cripto_racers_private_key_password_ac2",
+        "-config", f"openssl_{ac_name}.cnf",
+        "-passin", f"pass:cripto_racers_private_key_password_{ac_name.lower()}",
         "-batch", "-policy", "policy_anything"
     ]
-    
+    print(f"AAAAAAAAAAAAAAAAAA -> cripto_racers_private_key_password_{ac_name.lower()}")
     try:
-        subprocess.run(cmd_sign, cwd="PKI/AC2", capture_output=True, text=True, check=True)
-        type_text(terminal, f"Certificado firmado por AC2 correctamente\n")
+        subprocess.run(cmd_sign, cwd=f"PKI/{ac_name}", capture_output=True, text=True, check=True)
+        type_text(terminal, f"Certificado firmado por {ac_name} correctamente\n")
     except subprocess.CalledProcessError as e:
         type_text(terminal, f"Error firmando certificado: {e.stderr}\n")
         return None
@@ -384,38 +384,42 @@ def create_user_certificate(username: str, user_key: bytes, key_type: str, termi
         "-text",
         "-noout"
     ]
-    result = subprocess.run(cmd_read_cert, cwd="PKI/AC2", capture_output=True, text=True, check=True)
+    result = subprocess.run(cmd_read_cert, cwd=f"PKI/{ac_name}", capture_output=True, text=True, check=True)
     cert_content = result.stdout
     
     # Copiar certificado firmado a la carpeta del usuario
-    signed_cert_source = f"PKI/AC2/nuevoscerts/{username}_{key_type}_cert.pem"
+    signed_cert_source = f"PKI/{ac_name}/nuevoscerts/{username}_{key_type}_cert.pem"
     subprocess.run(["cp", signed_cert_source, cert_path], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    # Eliminar archivos temporales (clave pública y CSR) -> ya que solo nos interesa la clave privada y el certificado
+    public_key_path = f"{user_dir}/public_{key_type}.pem"
+    os.remove(public_key_path)
+    os.remove(csr_path)
 
     type_text(terminal, 
     f"CREACIÓN DE CERTIFICADO X.509 PARA {username}...\n"
-    "Solicitud del certificado generada correctamente:\n"
-    f"{csr_content}\n"
-    "Enviando solicitud al AC2...\n"
-    "Firma del certificado por AC2 exitosa:\n"
+    "Solicitud del certificado generada correctamente...\n"
+    f"Enviando solicitud al {ac_name} subordinada...\n"
+    f"Firma del certificado por {ac_name} subordinada exitosa:\n"
     f"{cert_content}\n"
     "Certificado guardado correctamente\n"
     "\n")
 
-def check_user_certificate(username: str, key_type: str, terminal):
+def check_user_certificate(username: str, key_type: str, terminal, ac_name: str):
     """
     Comprueba que el certificado del usuario es válido (cadena de confianza)
     """
     public_key = None
 
-    cmd_cp_ac1 = ["cp", "PKI/AC1/ac1cert.pem", "./"]
+    cmd_cp_ac1 = ["cp", f"PKI/AC1/ac1cert.pem", "./"]
     subprocess.run(cmd_cp_ac1, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    cmd_cp_ac2 = ["cp", "PKI/AC2/ac2cert.pem", "./"]
-    subprocess.run(cmd_cp_ac2, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    cmd_cp_acsub = ["cp", f"PKI/{ac_name}/{ac_name.lower()}cert.pem", "./"]
+    subprocess.run(cmd_cp_acsub, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     with open("certs.pem", "wb") as outfile:
         with open("ac1cert.pem", "rb") as infile_ac1:
             outfile.write(infile_ac1.read())
-        with open("ac2cert.pem", "rb") as infile_ac2:
-            outfile.write(infile_ac2.read())
+        with open(f"{ac_name.lower()}cert.pem", "rb") as infile_acsub:
+            outfile.write(infile_acsub.read())
 
     cmd_verify = ["openssl", "verify", "-CAfile", "certs.pem", f"PKI/Users/{username}/{key_type}/{username}_{key_type}_cert.pem"]
     result = subprocess.run(cmd_verify, capture_output=True, text=True, check=True)
@@ -435,7 +439,11 @@ def check_user_certificate(username: str, key_type: str, terminal):
                 text=True # Usar text=True para obtener la salida como string (PEM)
             )
         public_key = result_pubkey.stdout.encode('utf-8')    # Borrar archivos temporales
-    rm_certs = ["rm", "ac1cert.pem", "ac2cert.pem", "certs.pem"]
+    rm_certs = ["rm", "ac1cert.pem", f"{ac_name.lower()}cert.pem", "certs.pem"]
     subprocess.run(rm_certs, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    type_text(terminal, "Certificado verificado correctamente\n")
+    type_text(terminal, 
+    f"VERIFICACIÓN DE CERTIFICADO X.509 PARA {username}...\n"
+    "Comenzando verificación en cadena...\n"
+    "Certificado verificado correctamente\n"
+    "\n")
     return public_key
