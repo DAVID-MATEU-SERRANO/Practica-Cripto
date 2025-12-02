@@ -342,17 +342,6 @@ def create_user_certificate(username: str, user_key: bytes, key_type: str, termi
     ac_sub_solicitudes = f"PKI/{ac_name}/solicitudes"
     dest_csr = f"{ac_sub_solicitudes}/{username}_{key_type}_req.pem"
     subprocess.run(["cp", csr_path, dest_csr], capture_output=True, text=True, check=True)
-    
-    #Leer la solicitud del certificado
-    # Leer el contenido de la solicitud (CSR)
-    cmd_read_csr = [
-        "openssl", "req",
-        "-in", f"./solicitudes/{username}_{key_type}_req.pem",
-        "-text",
-        "-noout"
-    ]
-    result = subprocess.run(cmd_read_csr, cwd=f"PKI/{ac_name}", capture_output=True, text=True, check=True)
-    csr_content = result.stdout  
 
     # Comando para firmar (ejecutado desde el directorio de AC subordinada)
     cmd_sign = [

@@ -209,11 +209,11 @@ def race(user_name, user_path, user_key, terminal, selected_race_car):
             loser_car = user_race_car
 
     if winner == user_name:
-        race_msg += f"Enhorabuena tu {winer_car["brand"]} {winer_car["model"]} ha saido victorioso🏆\nSe te sumarán 200 puntos                         \n"
+        race_msg += f"Enhorabuena tu {winer_car["brand"]} {winer_car["model"]} ha salido victorioso🏆\nSe te sumarán 200 puntos                         \n"
         user_data["points"] += 200
 
     else:
-        race_msg += f"Vaya, parece que tu {loser_car["brand"]} {loser_car["model"]} ha perdido👎\nSe te restarán 200 puntos                         \n"
+        race_msg += f"Vaya, parece que tu {loser_car["brand"]} {loser_car["model"]} ha salido perdedor👎\nSe te restarán 200 puntos                         \n"
         user_data["points"] -= 200
     race_msg += "###############################\n"
     race_data.pop(selected_race)
