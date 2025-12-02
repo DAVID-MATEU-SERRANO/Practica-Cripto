@@ -33,7 +33,7 @@ class TestUtilityFunctions(unittest.TestCase):
     # Tests para hash_password
     def test_hash_password_generates_salt_when_none(self):
         """Test: hash_password genera salt cuando no se proporciona"""
-        salt_password, salt_key, hash_b64 = uf.hash_password("TestPassword123-")
+        salt_password, salt_key, hash_b64 = uf.hash_password("TestPassword123-", self.mock_terminal)
         
         self.assertIsNotNone(salt_password)
         self.assertIsNotNone(salt_key)
@@ -45,7 +45,7 @@ class TestUtilityFunctions(unittest.TestCase):
     def test_hash_password_uses_provided_salt(self):
         """Test: hash_password usa salt proporcionado"""
         provided_salt = b"provided_salt_16"
-        salt_password, salt_key, hash_b64 = uf.hash_password("TestPassword123-", provided_salt)
+        salt_password, salt_key, hash_b64 = uf.hash_password("TestPassword123-", self.mock_terminal, provided_salt)
         
         decoded_salt = base64.b64decode(salt_password)
         self.assertEqual(decoded_salt, provided_salt)
@@ -55,8 +55,8 @@ class TestUtilityFunctions(unittest.TestCase):
         salt = b"test_salt_16_bytes"
         password = "TestPassword123-"
         
-        _, _, result1 = uf.hash_password(password, salt)
-        _, _, result2 = uf.hash_password(password, salt)
+        _, _, result1 = uf.hash_password(password, self.mock_terminal, salt)
+        _, _, result2 = uf.hash_password(password, self.mock_terminal, salt)
         
         self.assertEqual(result1, result2)
 
@@ -64,7 +64,7 @@ class TestUtilityFunctions(unittest.TestCase):
     def test_generate_user_key_returns_32_bytes(self):
         """Test: generate_user_key retorna clave de 32 bytes"""
         salt = b"test_salt_16_bytes"
-        key = uf.generate_user_key("TestPassword123-", salt)
+        key = uf.generate_user_key("TestPassword123-", salt, self.mock_terminal)
         
         self.assertEqual(len(key), 32)  
 
@@ -73,8 +73,8 @@ class TestUtilityFunctions(unittest.TestCase):
         salt = b"test_salt_16_bytes"
         password = "TestPassword123-"
         
-        key1 = uf.generate_user_key(password, salt)
-        key2 = uf.generate_user_key(password, salt)
+        key1 = uf.generate_user_key(password, salt, self.mock_terminal)
+        key2 = uf.generate_user_key(password, salt, self.mock_terminal)
         
         self.assertEqual(key1, key2)
 
@@ -84,7 +84,7 @@ class TestUtilityFunctions(unittest.TestCase):
         key = b"test_key_32_bytes_12345678901234"
         plaintext = b"Test plaintext message"
         
-        cipher, ciphertext, tag = uf.encrypt_data(key, plaintext)
+        cipher, ciphertext, tag = uf.encrypt_data(key, plaintext, self.mock_terminal)
         
         self.assertIsNotNone(cipher.nonce)
         self.assertIsNotNone(ciphertext)
@@ -102,7 +102,7 @@ class TestUtilityFunctions(unittest.TestCase):
         test_data = {"test": "data", "number": 123}
         plaintext = json.dumps(test_data).encode('utf-8')
         
-        cipher = uf.encrypt_data(key, plaintext)
+        cipher = uf.encrypt_data(key, plaintext, self.mock_terminal)
         file_bytes = cipher[0].nonce + cipher[2] + cipher[1]  
         
         result = uf.desencrypt_data(file_bytes, key, self.mock_terminal)
@@ -119,7 +119,7 @@ class TestUtilityFunctions(unittest.TestCase):
         plaintext = json.dumps(test_data).encode('utf-8')
         
         # Encriptar con una clave
-        cipher = uf.encrypt_data(key, plaintext)
+        cipher = uf.encrypt_data(key, plaintext, self.mock_terminal)
         file_bytes = cipher[0].nonce + cipher[2] + cipher[1]
         
         # Intentar desencriptar con clave diferente
@@ -284,5 +284,132 @@ class TestUtilityFunctions(unittest.TestCase):
         exists = uf.upgrade_exists("AnyUpgrade", user_data, 0)
         self.assertFalse(exists)
 
+    def test_generate_random_symmetric_key(self):
+        """Test: generate_random_symmetric_key retorna clave de 32 bytes"""
+        key = uf.generate_random_symmetric_key(self.mock_terminal)
+        self.assertEqual(len(key), 32)
+        self.assertIsInstance(key, bytes)
+
+    @patch('utility_functions.RSA.generate')
+    def test_generate_rsa_keypair(self, mock_rsa_generate):
+        """Test: generate_rsa_keypair genera y guarda claves"""
+        mock_key = Mock()
+        mock_key.export_key.return_value = b"encrypted_private_key"
+        mock_key.publickey.return_value.export_key.return_value = b"public_key"
+        mock_rsa_generate.return_value = mock_key
+        
+        user_key = b"user_key_32_bytes_123456789012"
+        
+        with patch('builtins.open', unittest.mock.mock_open()) as mock_file:
+            uf.generate_rsa_keypair(user_key, self.mock_terminal, "testuser", "cod")
+            
+            self.assertEqual(mock_file.call_count, 2)
+
+    def test_encrypt_decrypt_rsa_message(self):
+        """Test: encrypt_rsa_message y decrypt_rsa_message funcionan correctamente"""
+        key = uf.RSA.generate(2048)
+        public_key_pem = key.publickey().export_key()
+        
+        message = b"Secret message for hybrid encryption"
+        
+        encrypted = uf.encrypt_rsa_message(message, public_key_pem, self.mock_terminal)
+        self.assertNotEqual(encrypted, message)
+        
+        decrypted = uf.decrypt_rsa_message(encrypted, key, self.mock_terminal)
+        self.assertEqual(decrypted, message)
+
+    def test_sign_verify_signature_success(self):
+        """Test: Firma y verificación exitosa"""
+        key = uf.RSA.generate(2048)
+        public_key_pem = key.publickey().export_key()
+        
+        message = '{"data": "important race data"}'
+        
+        signature_b64 = uf.sign_message(key, message, self.mock_terminal)
+        self.assertIsInstance(signature_b64, str)
+        
+        result = uf.verify_signature(public_key_pem, message, signature_b64, self.mock_terminal)
+        self.assertTrue(result)
+
+    def test_verify_signature_failure_modified_message(self):
+        """Test: Verificación falla si el mensaje cambia"""
+        key = uf.RSA.generate(2048)
+        public_key_pem = key.publickey().export_key()
+        
+        message = '{"data": "original"}'
+        signature_b64 = uf.sign_message(key, message, self.mock_terminal)
+        
+        modified_message = '{"data": "modified"}'
+        result = uf.verify_signature(public_key_pem, modified_message, signature_b64, self.mock_terminal)
+        self.assertFalse(result)
+
+    def test_verify_signature_failure_invalid_signature(self):
+        """Test: Verificación falla con firma inválida"""
+        key = uf.RSA.generate(2048)
+        public_key_pem = key.publickey().export_key()
+        
+        message = '{"data": "original"}'
+        invalid_signature = base64.b64encode(b"invalid_signature").decode('ascii')
+        
+        result = uf.verify_signature(public_key_pem, message, invalid_signature, self.mock_terminal)
+        self.assertFalse(result)
+
+    @patch('subprocess.run')
+    @patch('os.remove')
+    def test_create_user_certificate(self, mock_remove, mock_subprocess):
+        """Test: create_user_certificate ejecuta comandos OpenSSL"""
+        mock_subprocess.return_value.stdout = "Certificate Content"
+        
+        user_key = b"user_key"
+        
+        with patch('builtins.open', unittest.mock.mock_open()):
+            uf.create_user_certificate("testuser", user_key, "cod", self.mock_terminal, "AC2")
+            
+            self.assertTrue(mock_subprocess.called)
+            self.assertEqual(mock_remove.call_count, 2)
+
+    @patch('subprocess.run')
+    def test_check_user_certificate_valid(self, mock_subprocess):
+        """Test: check_user_certificate retorna clave pública si es válido"""
+        def subprocess_side_effect(cmd, **kwargs):
+            mock_res = Mock()
+            if "verify" in cmd:
+                mock_res.stdout = "testuser_cod_cert.pem: OK"
+                mock_res.returncode = 0
+            elif "x509" in cmd and "-pubkey" in cmd:
+                mock_res.stdout = "PUBLIC KEY PEM CONTENT"
+                mock_res.returncode = 0
+            else:
+                mock_res.returncode = 0
+            return mock_res
+
+        mock_subprocess.side_effect = subprocess_side_effect
+        
+        with patch('builtins.open', unittest.mock.mock_open()):
+            public_key = uf.check_user_certificate("testuser", "cod", self.mock_terminal, "AC2")
+            
+            self.assertEqual(public_key, b"PUBLIC KEY PEM CONTENT")
+
+    @patch('subprocess.run')
+    def test_check_user_certificate_invalid(self, mock_subprocess):
+        """Test: check_user_certificate retorna None si es inválido"""
+        def subprocess_side_effect(cmd, **kwargs):
+            mock_res = Mock()
+            if "verify" in cmd:
+                mock_res.stdout = "error 18 at 0 depth lookup: self signed certificate"
+                mock_res.returncode = 1 
+            else:
+                mock_res.returncode = 0
+            return mock_res
+
+        mock_subprocess.side_effect = subprocess_side_effect
+        
+        with patch('builtins.open', unittest.mock.mock_open()):
+            public_key = uf.check_user_certificate("testuser", "cod", self.mock_terminal, "AC2")
+            
+            self.assertIsNone(public_key)
+
+
 if __name__ == '__main__':
     unittest.main()
+    

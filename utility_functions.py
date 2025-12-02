@@ -306,8 +306,8 @@ def verify_signature(public_key_bytes: bytes, message: str, signature_b64: str, 
         # La firma no era correcta
         type_text(terminal, 
                   "VERIFICACIÓN DE FIRMA DIGITAL RSASSA-PSS...\n"
-                  "Usando clave pública...\n"
-                  f"Firma digital verificada incorrectamente --> {signature_b64}\n"
+                  "Usando clave pública del rival...\n"
+                  f"Firma digital verificada incorrectamente\n"
                   "\n") 
         return False
 
@@ -336,14 +336,8 @@ def create_user_certificate(username: str, user_key: bytes, key_type: str, termi
         "-passin", f"pass:{user_key.hex()}"  
     ]
     
-    try:
-        subprocess.run(cmd_csr, capture_output=True, text=True, check=True)
-    except subprocess.CalledProcessError as e:
-        type_text(terminal, f"ERROR generando CSR: {e.stderr}\n")
-        return None
-    except Exception as e:
-        type_text(terminal, f"ERROR inesperado en CSR: {str(e)}\n")
-        return None    
+    subprocess.run(cmd_csr, capture_output=True, text=True, check=True)
+ 
     # Copiar CSR a ACsubordinada/solicitudes
     ac_sub_solicitudes = f"PKI/{ac_name}/solicitudes"
     dest_csr = f"{ac_sub_solicitudes}/{username}_{key_type}_req.pem"
@@ -369,13 +363,8 @@ def create_user_certificate(username: str, user_key: bytes, key_type: str, termi
         "-passin", f"pass:cripto_racers_private_key_password_{ac_name.lower()}",
         "-batch", "-policy", "policy_anything"
     ]
-    print(f"AAAAAAAAAAAAAAAAAA -> cripto_racers_private_key_password_{ac_name.lower()}")
-    try:
-        subprocess.run(cmd_sign, cwd=f"PKI/{ac_name}", capture_output=True, text=True, check=True)
-        type_text(terminal, f"Certificado firmado por {ac_name} correctamente\n")
-    except subprocess.CalledProcessError as e:
-        type_text(terminal, f"Error firmando certificado: {e.stderr}\n")
-        return None
+    subprocess.run(cmd_sign, cwd=f"PKI/{ac_name}", capture_output=True, text=True, check=True)
+    type_text(terminal, f"Certificado firmado por {ac_name} correctamente\n")
 
     # Leer el contenido del certificado firmado
     cmd_read_cert = [
@@ -438,12 +427,19 @@ def check_user_certificate(username: str, key_type: str, terminal, ac_name: str)
                 check=True, 
                 text=True # Usar text=True para obtener la salida como string (PEM)
             )
-        public_key = result_pubkey.stdout.encode('utf-8')    # Borrar archivos temporales
+        public_key = result_pubkey.stdout.encode('utf-8')    
+        type_text(terminal, 
+                  f"VERIFICACIÓN DE CERTIFICADO X.509 PARA {username}...\n"
+                  "Comenzando verificación en cadena...\n"
+                  "Certificado verificado correctamente\n"
+                  "\n")
+    else:
+        type_text(terminal, 
+                  f"VERIFICACIÓN DE CERTIFICADO X.509 PARA {username}...\n"
+                  "Comenzando verificación en cadena...\n"
+                  "Certificado verificado incorrectamente\n"
+                  "\n")
+    # Borrar archvos temporales
     rm_certs = ["rm", "ac1cert.pem", f"{ac_name.lower()}cert.pem", "certs.pem"]
     subprocess.run(rm_certs, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    type_text(terminal, 
-    f"VERIFICACIÓN DE CERTIFICADO X.509 PARA {username}...\n"
-    "Comenzando verificación en cadena...\n"
-    "Certificado verificado correctamente\n"
-    "\n")
     return public_key

@@ -122,13 +122,15 @@ class TestAuthFunctions(unittest.TestCase):
                 "Debe introducir una contraseña válida\nEsta debe contener al menos 1 mayúscula, 1 número, un símbolo (-, _) y tener una longitud mínima de 12"
             )
 
+    @patch('auth.create_user_certificate')
+    @patch('auth.generate_rsa_keypair')
     @patch('auth.store_encrypted_data')
     @patch('auth.generate_user_key')
     @patch('auth.hash_password')
     @patch('auth.store_data')
     @patch('auth.load_data')
     def test_register_user_success(self, mock_load_data, mock_store_data, mock_hash_password, 
-                                mock_generate_key, mock_store_encrypted):
+                                mock_generate_key, mock_store_encrypted, mock_gen_rsa, mock_create_cert):
         """Test: Registro exitoso"""
         valid_salt_password = b"16_bytes_salt!!"
         valid_salt_key = b"16_bytes_key_salt"
@@ -171,8 +173,13 @@ class TestAuthFunctions(unittest.TestCase):
             
             mock_generate_key.assert_called_once_with(
                 "ValidPassword123-", 
-                valid_salt_key  
+                valid_salt_key,
+                self.mock_terminal
             )
+            
+            # Verificar llamadas a PKI
+            self.assertEqual(mock_gen_rsa.call_count, 2) # cod y sign
+            self.assertEqual(mock_create_cert.call_count, 2) # cod y sign
             
             self.assertTrue(mock_type_text.called)
 
