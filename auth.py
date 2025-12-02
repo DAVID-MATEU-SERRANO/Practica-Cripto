@@ -276,8 +276,7 @@ def register_user(username: str, password: str, terminal):
     user_data = load_data(USER_DATA_PATH)
     user_data["username"] = username
     user_data["garage"] = []
-    # TODO: Cambiar los puntos iniciales a 200
-    user_data["points"] = 2000000000
+    user_data["points"] = 200
 
     store_encrypted_data(user_data, USER_DATA_PATH, user_key, terminal)
 
